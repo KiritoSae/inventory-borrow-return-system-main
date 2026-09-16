@@ -1,177 +1,190 @@
 <?php
 
-session_start();
-
-require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../includes/auth.php';
+require_once "../includes/auth.php";
+require_once "../config/database.php";
 
 requireLogin();
-
-/*
-|--------------------------------------------------------------------------
-| Make sure only Staff can access this page
-|--------------------------------------------------------------------------
-*/
 
 if ($_SESSION['role'] !== 'Staff') {
     header("Location: ../admin/dashboard.php");
     exit;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| Get logged-in user's information
-|--------------------------------------------------------------------------
-*/
-
 $userId = $_SESSION['user_id'];
 
-$fullName = $_SESSION['full_name'] ?? 'Staff User';
-
-$borrowerId = $_SESSION['borrower_id'] ?? null;
-
-
 /*
 |--------------------------------------------------------------------------
-| Get borrower's department
+| Find the borrower connected to this Staff account
 |--------------------------------------------------------------------------
 */
 
-$borrower = null;
+$stmt = $pdo->prepare("
+    SELECT
+        borrowers.id,
+        borrowers.borrower_code,
+        borrowers.full_name,
+        borrowers.position,
+        borrowers.contact_number,
+        borrowers.email,
+        departments.department_name
+    FROM borrowers
+    LEFT JOIN departments
+        ON borrowers.department_id = departments.id
+    WHERE borrowers.user_id = ?
+    LIMIT 1
+");
 
-if ($borrowerId) {
+$stmt->execute([$userId]);
+$borrower = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    $stmt = $pdo->prepare("
-        SELECT
-            borrowers.id,
-            borrowers.borrower_code,
-            borrowers.full_name,
-            borrowers.position,
-            borrowers.contact_number,
-            borrowers.email,
-            departments.department_name
-
-        FROM borrowers
-
-        LEFT JOIN departments
-            ON departments.id = borrowers.department_id
-
-        WHERE borrowers.id = ?
-
-        LIMIT 1
+if (!$borrower) {
+    die("
+        <div style='
+            font-family: Arial;
+            max-width: 600px;
+            margin: 80px auto;
+            padding: 30px;
+            text-align: center;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+        '>
+            <h2>No Borrower Account Linked</h2>
+            <p>Your Staff account is not yet connected to a borrower record.</p>
+            <p>Please ask the administrator to link your account.</p>
+            <a href='../logout.php'>Logout</a>
+        </div>
     ");
-
-    $stmt->execute([$borrowerId]);
-
-    $borrower = $stmt->fetch(PDO::FETCH_ASSOC);
 }
 
+$borrowerId = $borrower['id'];
 
 /*
 |--------------------------------------------------------------------------
-| Count available inventory
+| Available Items
 |--------------------------------------------------------------------------
 */
 
 $stmt = $pdo->query("
-    SELECT COUNT(*)
+    SELECT
+        items.id,
+        items.item_code,
+        items.item_name,
+        items.category_id,
+        categories.category_name,
+        items.serial_number,
+        items.location,
+        items.item_condition,
+        items.status
     FROM items
-    WHERE status = 'Available'
+    LEFT JOIN categories
+        ON items.category_id = categories.id
+    WHERE items.status = 'Available'
+    ORDER BY items.item_name ASC
 ");
 
-$availableItems = (int) $stmt->fetchColumn();
-
-
-/*
-|--------------------------------------------------------------------------
-| Count current borrowed items
-|--------------------------------------------------------------------------
-*/
-
-$borrowedItems = 0;
-
-if ($borrowerId) {
-
-    $stmt = $pdo->prepare("
-        SELECT COUNT(*)
-
-        FROM transactions
-
-        WHERE borrower_id = ?
-
-        AND status = 'Borrowed'
-    ");
-
-    $stmt->execute([$borrowerId]);
-
-    $borrowedItems = (int) $stmt->fetchColumn();
-}
-
+$availableItems = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 /*
 |--------------------------------------------------------------------------
-| Count returned transactions
+| Current Borrowed Items
 |--------------------------------------------------------------------------
-
 */
 
-$returnedItems = 0;
+$stmt = $pdo->prepare("
+    SELECT
+        transactions.id,
+        transactions.transaction_code,
+        transactions.borrowed_date,
+        transactions.due_date,
+        transactions.status,
+        transactions.remarks,
+        items.item_code,
+        items.item_name,
+        items.serial_number
+    FROM transactions
+    INNER JOIN items
+        ON transactions.item_id = items.id
+    WHERE transactions.borrower_id = ?
+      AND transactions.status IN ('Borrowed', 'Overdue')
+    ORDER BY transactions.borrowed_date DESC
+");
 
-if ($borrowerId) {
-
-    $stmt = $pdo->prepare("
-        SELECT COUNT(*)
-
-        FROM transactions
-
-        WHERE borrower_id = ?
-
-        AND status = 'Returned'
-    ");
-
-    $stmt->execute([$borrowerId]);
-
-    $returnedItems = (int) $stmt->fetchColumn();
-}
-
+$stmt->execute([$borrowerId]);
+$borrowedItems = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 /*
 |--------------------------------------------------------------------------
-| Get current borrowed items
+| Returned History
 |--------------------------------------------------------------------------
 */
 
-$currentBorrowed = [];
+$stmt = $pdo->prepare("
+    SELECT
+        transactions.transaction_code,
+        transactions.borrowed_date,
+        transactions.due_date,
+        transactions.returned_date,
+        transactions.status,
+        items.item_code,
+        items.item_name
+    FROM transactions
+    INNER JOIN items
+        ON transactions.item_id = items.id
+    WHERE transactions.borrower_id = ?
+      AND transactions.status = 'Returned'
+    ORDER BY transactions.returned_date DESC
+    LIMIT 10
+");
 
-if ($borrowerId) {
+$stmt->execute([$borrowerId]);
+$returnedItems = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $stmt = $pdo->prepare("
-        SELECT
-            transactions.id,
-            transactions.transaction_code,
-            transactions.borrowed_date,
-            transactions.due_date,
+/*
+|--------------------------------------------------------------------------
+| Update overdue transactions
+|--------------------------------------------------------------------------
+*/
 
-            items.item_code,
-            items.item_name
+$pdo->exec("
+    UPDATE transactions
+    SET status = 'Overdue'
+    WHERE borrower_id = " . (int)$borrowerId . "
+      AND status = 'Borrowed'
+      AND due_date IS NOT NULL
+      AND due_date < CURDATE()
+");
 
-        FROM transactions
+/*
+|--------------------------------------------------------------------------
+| Count Available
+|--------------------------------------------------------------------------
+*/
 
-        INNER JOIN items
-            ON items.id = transactions.item_id
+$availableCount = count($availableItems);
 
-        WHERE transactions.borrower_id = ?
+/*
+|--------------------------------------------------------------------------
+| Count Borrowed
+|--------------------------------------------------------------------------
+*/
 
-        AND transactions.status = 'Borrowed'
+$borrowedCount = count($borrowedItems);
 
-        ORDER BY transactions.borrowed_date DESC
-    ");
+/*
+|--------------------------------------------------------------------------
+| Count Returned
+|--------------------------------------------------------------------------
+*/
 
-    $stmt->execute([$borrowerId]);
+$stmt = $pdo->prepare("
+    SELECT COUNT(*)
+    FROM transactions
+    WHERE borrower_id = ?
+      AND status = 'Returned'
+");
 
-    $currentBorrowed = $stmt->fetchAll(PDO::FETCH_ASSOC);
-}
+$stmt->execute([$borrowerId]);
+$returnedCount = (int)$stmt->fetchColumn();
 
 ?>
 
@@ -197,15 +210,15 @@ if ($borrowerId) {
     <style>
 
         .dashboard-container {
-            padding: 30px;
+            padding: 25px;
         }
 
         .welcome-card {
-            background: white;
-            border-radius: 12px;
+            background: #198754;
+            color: white;
             padding: 25px;
+            border-radius: 12px;
             margin-bottom: 25px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
         }
 
         .welcome-card h1 {
@@ -213,33 +226,35 @@ if ($borrowerId) {
         }
 
         .welcome-card p {
-            margin: 0;
-            color: #666;
+            margin: 5px 0;
         }
 
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             gap: 20px;
-            margin-bottom: 25px;
+            margin-bottom: 30px;
         }
 
         .stat-card {
             background: white;
-            padding: 25px;
             border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            padding: 25px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            border-left: 5px solid #198754;
         }
 
         .stat-card h3 {
-            margin: 0 0 10px;
+            margin: 0;
             color: #666;
             font-size: 15px;
         }
 
-        .stat-number {
-            font-size: 30px;
+        .stat-card .number {
+            font-size: 32px;
             font-weight: bold;
+            margin-top: 10px;
+            color: #198754;
         }
 
         .content-card {
@@ -247,33 +262,67 @@ if ($borrowerId) {
             border-radius: 12px;
             padding: 25px;
             margin-bottom: 25px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
         }
 
         .content-card h2 {
             margin-top: 0;
+            color: #198754;
         }
 
-        .borrower-info {
+        .borrow-form {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
+            grid-template-columns: 1fr 1fr auto;
             gap: 15px;
+            align-items: end;
+            margin-bottom: 20px;
         }
 
-        .info-box {
-            background: #f7f7f7;
-            padding: 15px;
-            border-radius: 8px;
+        .form-group {
+            display: flex;
+            flex-direction: column;
         }
 
-        .info-label {
-            font-size: 12px;
-            color: #777;
-            margin-bottom: 5px;
+        .form-group label {
+            font-weight: bold;
+            margin-bottom: 6px;
         }
 
-        .info-value {
-            font-weight: 600;
+        .form-group select,
+        .form-group input,
+        .form-group textarea {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .btn {
+            border: none;
+            border-radius: 6px;
+            padding: 11px 18px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+        }
+
+        .btn-primary {
+            background: #198754;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #146c43;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #bb2d3b;
         }
 
         .table-wrapper {
@@ -283,45 +332,54 @@ if ($borrowerId) {
         table {
             width: 100%;
             border-collapse: collapse;
+            min-width: 700px;
         }
 
         th,
         td {
-            padding: 13px;
+            padding: 12px;
+            border-bottom: 1px solid #ddd;
             text-align: left;
-            border-bottom: 1px solid #eee;
         }
 
         th {
-            background: #f7f7f7;
+            background: #f5f5f5;
         }
 
-        .status-badge {
-            display: inline-block;
+        .status {
             padding: 5px 10px;
             border-radius: 20px;
             font-size: 12px;
+            font-weight: bold;
+        }
+
+        .status-borrowed {
             background: #fff3cd;
             color: #856404;
         }
 
-        .empty-message {
-            text-align: center;
-            padding: 30px;
-            color: #777;
+        .status-overdue {
+            background: #f8d7da;
+            color: #842029;
         }
 
-        @media (max-width: 768px) {
+        .status-returned {
+            background: #d1e7dd;
+            color: #0f5132;
+        }
 
-            .dashboard-container {
-                padding: 15px;
-            }
+        .empty-message {
+            color: #777;
+            padding: 15px 0;
+        }
+
+        @media (max-width: 900px) {
 
             .stats-grid {
                 grid-template-columns: 1fr;
             }
 
-            .borrower-info {
+            .borrow-form {
                 grid-template-columns: 1fr;
             }
 
@@ -333,310 +391,402 @@ if ($borrowerId) {
 
 <body>
 
-<?php include __DIR__ . '/../includes/header.php'; ?>
-
-<?php include __DIR__ . '/../includes/sidebar.php'; ?>
-
-
-<main class="main-content">
-
-    <div class="dashboard-container">
-
-
-        <!-- Welcome -->
-
-        <div class="welcome-card">
-
-            <h1>
-                Welcome, <?= htmlspecialchars($fullName) ?>!
-            </h1>
-
-            <p>
-                This is your Staff Dashboard.
-            </p>
-
-        </div>
-
-
-        <!-- Statistics -->
-
-        <div class="stats-grid">
-
-
-            <div class="stat-card">
-
-                <h3>
-                    Available Items
-                </h3>
-
-                <div class="stat-number">
-                    <?= $availableItems ?>
-                </div>
-
-            </div>
-
-
-            <div class="stat-card">
-
-                <h3>
-                    My Borrowed Items
-                </h3>
-
-                <div class="stat-number">
-                    <?= $borrowedItems ?>
-                </div>
-
-
-        
-            </div>
-
-
-            <div class="stat-card">
-
-                <h3>
-                    Returned Items
-                </h3>
-
-                <div class="stat-number">
-                    <?= $returnedItems ?>
-                </div>
-
-            </div>
-
-
-        </div>
-
-
-        <!-- Borrower Information -->
-
-        <div class="content-card">
-
-            <h2>
-                My Information
-            </h2>
-
-
-            <?php if ($borrower): ?>
-
-                <div class="borrower-info">
-
-
-                    <div class="info-box">
-
-                        <div class="info-label">
-                            Borrower Code
-                        </div>
-
-                        <div class="info-value">
-
-                            <?= htmlspecialchars(
-                                $borrower['borrower_code']
-                            ) ?>
-
-                        </div>
-
-                    </div>
-
-
-                    <div class="info-box">
-
-                        <div class="info-label">
-                            Full Name
-                        </div>
-
-                        <div class="info-value">
-
-                            <?= htmlspecialchars(
-                                $borrower['full_name']
-                            ) ?>
-
-                        </div>
-
-                    </div>
-
-
-                    <div class="info-box">
-
-                        <div class="info-label">
-                            Department
-                        </div>
-
-                        <div class="info-value">
-
-                            <?= htmlspecialchars(
-                                $borrower['department_name']
-                                ?? 'Not Assigned'
-                            ) ?>
-
-                        </div>
-
-                    </div>
-
-
-                    <div class="info-box">
-
-                        <div class="info-label">
-                            Position
-                        </div>
-
-                        <div class="info-value">
-
-                            <?= htmlspecialchars(
-                                $borrower['position']
-                                ?? 'Not Provided'
-                            ) ?>
-
-                        </div>
-
-                    </div>
-                </div>
-
-
-            <?php else: ?>
-
-                <div class="empty-message">
-
-                    Your Staff account is not yet connected
-                    to a borrower record.
-
-                </div>
-
-            <?php endif; ?>
-
-
-        </div>
-
-
-        <!-- Current Borrowed Items -->
-
-        <div class="content-card">
-
-            <h2>
-                My Borrowed Items
-            </h2>
-
-
-            <?php if (!empty($currentBorrowed)): ?>
-
-                <div class="table-wrapper">
-
-                    <table>
-
-                        <thead>
-
-                            <tr>
-
-                                <th>
-                                    Transaction
-                                </th>
-
-                                <th>
-                                    Item Code
-                                </th>
-
-                                <th>
-                                    Item
-                                </th>
-
-                                <th>
-                                    Borrowed Date
-                                </th>
-
-                                <th>
-                                    Due Date
-                                </th>
-
-                                <th>
-                                    Status
-                                </th>
-
-                            </tr>
-
-                        </thead>
-
-
-                        <tbody>
-
-                        <?php foreach ($currentBorrowed as $transaction): ?>
-
-                            <tr>
-
-                                <td>
-
-                                    <?= htmlspecialchars(
-                                        $transaction['transaction_code']
-                                    ) ?>
-
-                                </td>
-
-                                <td>
-
-                                    <?= htmlspecialchars(
-                                        $transaction['item_code']
-                                    ) ?>
-
-                                </td>
-
-                                <td>
-
-                                    <?= htmlspecialchars(
-                                        $transaction['item_name']
-                                    ) ?>
-                                </td>
-
-                                <td>
-
-                                    <?= htmlspecialchars(
-                                        $transaction['borrowed_date']
-                                    ) ?>
-
-                                </td>
-
-                                <td>
-
-                                    <?= htmlspecialchars(
-                                        $transaction['due_date']
-                                    ) ?>
-
-                                </td>
-
-                                <td>
-
-                                    <span class="status-badge">
-                                        Borrowed
-                                    </span>
-
-                                </td>
-
-                            </tr>
-
-                        <?php endforeach; ?>
-
-                        </tbody>
-
-                    </table>
-
-                </div>
-
-
-            <?php else: ?>
-
-                <div class="empty-message">
-
-                    You currently have no borrowed items.
-
-                </div>
-
-            <?php endif; ?>
-
-
-        </div>
-
+<?php include "../includes/header.php"; ?>
+
+<div class="dashboard-container">
+
+    <!-- Welcome -->
+
+    <div class="welcome-card">
+
+        <h1>
+            Welcome, <?= htmlspecialchars($borrower['full_name']) ?>!
+        </h1>
+
+        <p>
+            Department:
+            <strong>
+                <?= htmlspecialchars($borrower['department_name'] ?? 'N/A') ?>
+            </strong>
+        </p>
+
+        <p>
+            Borrower Code:
+            <strong>
+                <?= htmlspecialchars($borrower['borrower_code']) ?>
+            </strong>
+        </p>
 
     </div>
 
-</main>
 
+    <!-- Statistics -->
+
+    <div class="stats-grid">
+
+        <div class="stat-card">
+
+            <h3>Available Items</h3>
+
+            <div class="number">
+                <?= $availableCount ?>
+            </div>
+
+        </div>
+
+
+        <div class="stat-card">
+
+            <h3>Currently Borrowed</h3>
+
+            <div class="number">
+                <?= $borrowedCount ?>
+            </div>
+
+        </div>
+
+
+        <div class="stat-card">
+
+            <h3>Total Returned</h3>
+
+            <div class="number">
+                <?= $returnedCount ?>
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <!-- Borrow Item -->
+
+    <div class="content-card">
+
+        <h2>Borrow an Item</h2>
+
+        <?php if (count($availableItems) > 0): ?>
+
+            <form
+                action="../actions/borrow_item.php"
+                method="POST"
+                class="borrow-form"
+            >
+
+                <input
+                    type="hidden"
+                    name="borrower_id"
+                    value="<?= $borrowerId ?>"
+                >
+
+                <div class="form-group">
+
+                    <label for="item_id">
+                        Select Item
+                    </label>
+
+                    <select
+                        name="item_id"
+                        id="item_id"
+                        required
+                    >
+
+                        <option value="">
+                            -- Select Item --
+                        </option>
+
+                        <?php foreach ($availableItems as $item): ?>
+
+                            <option value="<?= $item['id'] ?>">
+
+                                <?= htmlspecialchars($item['item_code']) ?>
+                                -
+                                <?= htmlspecialchars($item['item_name']) ?>
+
+                                <?php if (!empty($item['serial_number'])): ?>
+
+                                    (<?= htmlspecialchars($item['serial_number']) ?>)
+
+                                <?php endif; ?>
+
+                            </option>
+
+                        <?php endforeach; ?>
+
+                    </select>
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="due_date">
+                        Due Date
+                    </label>
+
+                    <input
+                        type="date"
+                        name="due_date"
+                        id="due_date"
+                        min="<?= date('Y-m-d') ?>"
+                        required
+                    >
+
+                </div>
+
+
+                <div>
+
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                    >
+                        Borrow Item
+                    </button>
+
+                </div>
+
+            </form>
+
+        <?php else: ?>
+
+            <p class="empty-message">
+                There are currently no available items.
+            </p>
+
+        <?php endif; ?>
+
+    </div>
+
+
+    <!-- Current Borrowed Items -->
+
+    <div class="content-card">
+
+        <h2>My Borrowed Items</h2>
+
+        <?php if (count($borrowedItems) > 0): ?>
+
+            <div class="table-wrapper">
+
+                <table>
+
+                    <thead>
+
+                        <tr>
+
+                            <th>Transaction</th>
+                            <th>Item</th>
+                            <th>Borrowed Date</th>
+                            <th>Due Date</th>
+                            <th>Status</th>
+                            <th>Action</th>
+
+                        </tr>
+
+                    </thead>
+
+                    <tbody>
+
+                    <?php foreach ($borrowedItems as $item): ?>
+
+                        <tr>
+
+                            <td>
+                                <?= htmlspecialchars($item['transaction_code']) ?>
+                            </td>
+
+                            <td>
+
+                                <strong>
+                                    <?= htmlspecialchars($item['item_name']) ?>
+                                </strong>
+
+                                <br>
+
+                                <small>
+                                    <?= htmlspecialchars($item['item_code']) ?>
+                                </small>
+
+                            </td>
+
+                            <td>
+                                <?= htmlspecialchars($item['borrowed_date']) ?>
+                            </td>
+
+                            <td>
+                                <?= htmlspecialchars($item['due_date'] ?? 'N/A') ?>
+                            </td>
+
+                            <td>
+
+                                <?php if ($item['status'] === 'Overdue'): ?>
+
+                                    <span class="status status-overdue">
+                                        Overdue
+                                    </span>
+
+                                <?php else: ?>
+
+                                    <span class="status status-borrowed">
+                                        Borrowed
+                                    </span>
+
+                                <?php endif; ?>
+
+                            </td>
+
+                            <td>
+
+                                <form
+                                    action="../actions/return.php"
+                                    method="POST"
+                                    onsubmit="return confirm('Are you sure you want to return this item?');"
+                                >
+
+                                    <input
+                                        type="hidden"
+                                        name="transaction_id"
+                                        value="<?= $item['id'] ?>"
+                                    >
+
+                                    <input
+                                        type="hidden"
+                                        name="item_id"
+                                        value="<?= $item['item_id'] ?? '' ?>"
+                                    >
+
+                                    <input
+                                        type="hidden"
+                                        name="return_condition"
+                                        value="Good"
+                                    >
+
+                                    <input
+                                        type="hidden"
+                                        name="return_remarks"
+                                        value=""
+                                    >
+
+                                    <button
+                                        type="submit"
+                                        class="btn btn-danger"
+                                    >
+                                        Return
+                                    </button>
+
+                                </form>
+
+                            </td>
+
+                        </tr>
+
+                    <?php endforeach; ?>
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        <?php else: ?>
+
+            <p class="empty-message">
+                You currently have no borrowed items.
+            </p>
+
+        <?php endif; ?>
+
+    </div>
+
+
+    <!-- Return History -->
+
+    <div class="content-card">
+
+        <h2>Recent Return History</h2>
+
+        <?php if (count($returnedItems) > 0): ?>
+
+            <div class="table-wrapper">
+
+                <table>
+
+                    <thead>
+
+                        <tr>
+
+                            <th>Transaction</th>
+                            <th>Item</th>
+                            <th>Borrowed</th>
+                            <th>Returned</th>
+                            <th>Status</th>
+
+                        </tr>
+
+                    </thead>
+
+                    <tbody>
+
+                    <?php foreach ($returnedItems as $item): ?>
+
+                        <tr>
+
+                            <td>
+                                <?= htmlspecialchars($item['transaction_code']) ?>
+                            </td>
+
+                            <td>
+
+                                <?= htmlspecialchars($item['item_name']) ?>
+
+                                <br>
+
+                                <small>
+                                    <?= htmlspecialchars($item['item_code']) ?>
+                                </small>
+
+                            </td>
+
+                            <td>
+                                <?= htmlspecialchars($item['borrowed_date']) ?>
+                            </td>
+
+                            <td>
+                                <?= htmlspecialchars($item['returned_date']) ?>
+                            </td>
+
+                            <td>
+
+                                <span class="status status-returned">
+                                    Returned
+                                </span>
+
+                            </td>
+
+                        </tr>
+
+                    <?php endforeach; ?>
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        <?php else: ?>
+
+            <p class="empty-message">
+                No returned items yet.
+            </p>
+
+        <?php endif; ?>
+
+    </div>
+
+</div>
+
+<?php include "../includes/footer.php"; ?>
 
 </body>
 

@@ -1,47 +1,70 @@
 <?php
 
-require_once __DIR__ . '/../includes/auth.php';
-requireLogin();
+require_once "../includes/auth.php";
+require_once "../config/database.php";
 
-require_once __DIR__ . '/../config/database.php';
+requireAdmin();
 
-$itemId = filter_input(
-    INPUT_GET,
-    'id',
-    FILTER_VALIDATE_INT
-);
-
-if (!$itemId) {
+if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
     die("Invalid item ID.");
 }
 
+$itemId = (int)$_GET['id'];
 
 $stmt = $pdo->prepare("
     SELECT
-        item_code,
-        item_name,
-        qr_code
+        items.id,
+        items.item_code,
+        items.item_name,
+        items.serial_number,
+        items.location,
+        items.item_condition,
+        items.status,
+        categories.category_name
     FROM items
-    WHERE id = ?
+    LEFT JOIN categories
+        ON items.category_id = categories.id
+    WHERE items.id = ?
     LIMIT 1
 ");
 
 $stmt->execute([$itemId]);
-
 $item = $stmt->fetch(PDO::FETCH_ASSOC);
 
-
 if (!$item) {
-    die("Inventory item not found.");
+    die("Item not found.");
 }
 
+/*
+|--------------------------------------------------------------------------
+| QR DATA
+|--------------------------------------------------------------------------
+| The QR contains a simple URL pointing to scan.php.
+| When scanned, the system can identify the item.
+|--------------------------------------------------------------------------
+*/
 
-$qrData = $item['qr_code'];
+$baseUrl =
+    (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'
+        ? 'https'
+        : 'http')
+    . '://'
+    . $_SERVER['HTTP_HOST'];
+
+$projectPath = dirname(dirname($_SERVER['SCRIPT_NAME']));
+
+$scanUrl =
+    rtrim($baseUrl . $projectPath, '/')
+    . "/qr/scan.php?id="
+    . $itemId;
+
+$qrUrl =
+    "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data="
+    . urlencode($scanUrl);
 
 ?>
 
 <!DOCTYPE html>
-
 <html lang="en">
 
 <head>
@@ -53,142 +76,102 @@ $qrData = $item['qr_code'];
         content="width=device-width, initial-scale=1.0"
     >
 
-    <title>
-        QR Code - <?= htmlspecialchars($item['item_code']) ?>
-    </title>
+    <title>Generate QR - Inventory System</title>
 
+    <link
+        rel="stylesheet"
+        href="../assets/css/style.css"
+    >
 
     <style>
 
-        * {
-            box-sizing: border-box;
+        .qr-container {
+            max-width: 650px;
+            margin: 30px auto;
+            padding: 20px;
         }
-
-
-        body {
-
-            font-family: Arial, sans-serif;
-
-            background: #f4f7f5;
-
-            margin: 0;
-
-            padding: 30px;
-
-            text-align: center;
-
-        }
-
 
         .qr-card {
-
             background: white;
-
-            max-width: 420px;
-
-            margin: 40px auto;
-
-            padding: 35px;
-
+            padding: 30px;
             border-radius: 15px;
-
-            box-shadow:
-                0 5px 20px
-                rgba(0, 0, 0, 0.08);
-
+            text-align: center;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.10);
         }
-
 
         .qr-card h1 {
-
-            margin-bottom: 8px;
-
-            font-size: 24px;
-
-        }
-
-
-        .item-code {
-
             color: #198754;
-
-            font-size: 20px;
-
-            font-weight: bold;
-
+            margin-bottom: 10px;
         }
-
 
         .qr-image {
-
-            width: 250px;
-
-            height: 250px;
-
-            margin: 25px auto;
-
+            width: 300px;
+            max-width: 100%;
+            margin: 20px auto;
             display: block;
-
         }
 
-
-        .description {
-
-            color: #666;
-
-            font-size: 14px;
-
-            margin-bottom: 25px;
-
+        .item-info {
+            text-align: left;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
         }
 
+        .item-info p {
+            margin: 8px 0;
+        }
 
-        .print-button {
+        .button-group {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 25px;
+        }
 
-            background: #198754;
-
-            color: white;
-
+        .btn {
+            display: inline-block;
+            padding: 11px 18px;
+            border-radius: 7px;
+            text-decoration: none;
             border: none;
-
-            padding: 12px 25px;
-
-            border-radius: 8px;
-
             cursor: pointer;
-
-            font-size: 16px;
-
+            font-size: 14px;
         }
 
-
-        .print-button:hover {
-
-            background: #146c43;
-
+        .btn-primary {
+            background: #198754;
+            color: white;
         }
 
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
 
         @media print {
 
-            body {
-
-                background: white;
-
+            body * {
+                visibility: hidden;
             }
 
+            .qr-card,
+            .qr-card * {
+                visibility: visible;
+            }
 
             .qr-card {
-
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
                 box-shadow: none;
-
             }
 
-
-            .print-button {
-
+            .button-group {
                 display: none;
-
             }
 
         }
@@ -197,65 +180,83 @@ $qrData = $item['qr_code'];
 
 </head>
 
-
 <body>
 
+<?php include "../includes/header.php"; ?>
+
+<div class="qr-container">
 
     <div class="qr-card">
 
+        <h1>Item QR Code</h1>
 
-        <h1>
+        <p>
+            Scan this QR code to identify the inventory item.
+        </p>
 
-            <?= htmlspecialchars(
-                $item['item_name']
-            ) ?>
+        <img
+            src="<?= htmlspecialchars($qrUrl) ?>"
+            alt="QR Code"
+            class="qr-image"
+        >
 
-        </h1>
+        <div class="item-info">
 
+            <p>
+                <strong>Item Code:</strong>
+                <?= htmlspecialchars($item['item_code']) ?>
+            </p>
 
-        <div class="item-code">
+            <p>
+                <strong>Item Name:</strong>
+                <?= htmlspecialchars($item['item_name']) ?>
+            </p>
 
-            <?= htmlspecialchars(
-                $item['item_code']
-            ) ?>
+            <p>
+                <strong>Category:</strong>
+                <?= htmlspecialchars($item['category_name'] ?? 'N/A') ?>
+            </p>
+
+            <p>
+                <strong>Serial Number:</strong>
+                <?= htmlspecialchars($item['serial_number'] ?? 'N/A') ?>
+            </p>
+
+            <p>
+                <strong>Location:</strong>
+                <?= htmlspecialchars($item['location'] ?? 'N/A') ?>
+            </p>
+
+            <p>
+                <strong>Status:</strong>
+                <?= htmlspecialchars($item['status']) ?>
+            </p>
 
         </div>
 
+        <div class="button-group">
 
-        <img
+            <button
+                onclick="window.print()"
+                class="btn btn-primary"
+            >
+                Print QR
+            </button>
 
-            class="qr-image"
+            <a
+                href="../admin/inventory.php"
+                class="btn btn-secondary"
+            >
+                Back to Inventory
+            </a>
 
-            src="https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=<?= urlencode($qrData) ?>"
-
-            alt="QR Code"
-
-        >
-
-
-        <p class="description">
-
-            Scan this QR code to identify
-            this inventory item.
-
-        </p>
-
-
-        <button
-
-            class="print-button"
-
-            onclick="window.print()"
-
-        >
-
-            Print QR Code
-
-        </button>
-
+        </div>
 
     </div>
 
+</div>
+
+<?php include "../includes/footer.php"; ?>
 
 </body>
 

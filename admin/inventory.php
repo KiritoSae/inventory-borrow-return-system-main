@@ -832,11 +832,10 @@ if (isset($_GET['edit'])) {
                                 <td>
 
                                     <a
-                                        href="../qr/generate.php?id=<?= (int) $item['id'] ?>"
-                                        target="_blank"
-                                        class="inventory-qr"
-                                    >
-                                        QR
+                                        href="../qr/generate.php?id=<?= $item['id'] ?>"
+                                        class="btn btn-primary"
+                                                                >
+                                    QR Code
                                     </a>
 
                                 </td>
