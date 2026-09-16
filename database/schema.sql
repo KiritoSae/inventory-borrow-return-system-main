@@ -38,14 +38,29 @@ CREATE TABLE users (
 
 CREATE TABLE borrowers (
     id INT AUTO_INCREMENT PRIMARY KEY,
+
+    user_id INT UNIQUE,
+
     borrower_code VARCHAR(50) NOT NULL UNIQUE,
+
     full_name VARCHAR(150) NOT NULL,
+
     department_id INT NOT NULL,
+
     position VARCHAR(100),
+
     contact_number VARCHAR(50),
+
     email VARCHAR(150),
+
     status ENUM('Active', 'Inactive') DEFAULT 'Active',
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id)
+        REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
 
     FOREIGN KEY (department_id)
         REFERENCES departments(id)

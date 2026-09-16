@@ -18,9 +18,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
 
         $stmt = $pdo->prepare("
-            SELECT id, full_name, username, password, role, status
+            SELECT
+                users.id,
+                users.full_name,
+                users.username,
+                users.password,
+                users.role,
+                users.status,
+
+                borrowers.id AS borrower_id,
+                borrowers.borrower_code
+
             FROM users
-            WHERE username = ?
+
+            LEFT JOIN borrowers
+                ON borrowers.user_id = users.id
+
+            WHERE users.username = ?
+
             LIMIT 1
         ");
 
@@ -37,12 +52,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             session_regenerate_id(true);
 
             $_SESSION['user_id'] = $user['id'];
+
             $_SESSION['full_name'] = $user['full_name'];
+
             $_SESSION['username'] = $user['username'];
+
             $_SESSION['role'] = $user['role'];
 
-            header("Location: admin/dashboard.php");
-            exit;
+            /*
+             * Store borrower information if
+             * this Staff account is connected
+             * to a borrower record.
+             */
+
+            if (!empty($user['borrower_id'])) {
+
+                $_SESSION['borrower_id'] = $user['borrower_id'];
+
+                $_SESSION['borrower_code'] = $user['borrower_code'];
+
+            } else {
+
+                unset($_SESSION['borrower_id']);
+
+                unset($_SESSION['borrower_code']);
+
+            }
+
+
+            /*
+             * Redirect based on account role.
+             */
+
+            if ($user['role'] === 'Admin') {
+
+                header("Location: admin/dashboard.php");
+
+                exit;
+
+            }
+
+
+            if ($user['role'] === 'Staff') {
+
+                header("Location: borrower/dashboard.php");
+
+                exit;
+
+            }
+
+
+            $error = 'Invalid account role.';
 
         } else {
 
@@ -89,13 +149,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     📦
                 </div>
 
-                <h1>Inventory System</h1>
+                <h1>
+                    Inventory System
+                </h1>
 
                 <p>
                     Borrowing & Return Management
                 </p>
 
             </div>
+
 
             <?php if ($error): ?>
 
@@ -107,13 +170,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     margin-bottom:20px;
                     font-size:14px;
                 ">
+
                     <?= htmlspecialchars($error) ?>
+
                 </div>
 
             <?php endif; ?>
 
 
-            <form method="POST" action="login.php">
+            <form
+                method="POST"
+                action="login.php"
+            >
 
                 <div class="form-group">
 
