@@ -1,529 +1,1424 @@
-<?php require_once __DIR__ . '/../includes/auth.php'; requireLogin(); require_once __DIR__ . '/../config/database.php'; $borrowers = []; $borrowerCount = 0; $departmentList = []; $editBorrower = null; // LOAD BORROWERS try { $stmt = $pdo->query(" SELECT b.id, b.borrower_code, b.full_name, b.department_id, b.position, b.contact_number, b.email, b.status, b.created_at, d.department_name FROM borrowers b LEFT JOIN departments d ON b.department_id = d.id ORDER BY b.full_name ASC "); $borrowers = $stmt->fetchAll(PDO::FETCH_ASSOC); $borrowerCount = count($borrowers); } catch (PDOException $e) { $borrowers = []; $borrowerCount = 0; } // LOAD DEPARTMENTS try { $stmt = $pdo->query(" SELECT id, department_name FROM departments WHERE status = 'Active' ORDER BY department_name ASC "); $departmentList = $stmt->fetchAll(PDO::FETCH_ASSOC); } catch (PDOException $e) { $departmentList = []; } // EDIT BORROWER if (isset($_GET['edit'])) { $editId = (int) $_GET['edit']; if ($editId > 0) { try { $stmt = $pdo->prepare(" SELECT id, borrower_code, full_name, department_id, position, contact_number, email, status FROM borrowers WHERE id = ? LIMIT 1 "); $stmt->execute([$editId]); $editBorrower = $stmt->fetch(PDO::FETCH_ASSOC) ?: null; } catch (PDOException $e) { $editBorrower = null; } } } ?> <?php require_once __DIR__ . '/../includes/header.php'; ?> <div class="app-layout"> <?php require_once __DIR__ . '/../includes/sidebar.php'; ?> <main class="main-content">
-<div class="page-header">
+<?php
 
-    <div>
+require_once __DIR__ . '/../includes/auth.php';
+requireAdmin();
 
-        <span class="borrower-label">
-            BORROWER MANAGEMENT
-        </span>
+require_once __DIR__ . '/../config/database.php';
 
-        <h1>Borrowers</h1>
+$borrowers = [];
+$departments = [];
+$editBorrower = null;
 
-        <p>
-            Manage employees who can borrow company inventory items.
-        </p>
+/*
+|--------------------------------------------------------------------------
+| ADD BORROWER
+|--------------------------------------------------------------------------
+*/
 
-    </div>
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_borrower'])) {
 
-    <div class="borrower-count">
+    $borrowerCode = trim($_POST['borrower_code'] ?? '');
+    $fullName = trim($_POST['full_name'] ?? '');
+    $departmentId = (int) ($_POST['department_id'] ?? 0);
+    $position = trim($_POST['position'] ?? '');
+    $contactNumber = trim($_POST['contact_number'] ?? '');
+    $email = trim($_POST['email'] ?? '');
+    $status = $_POST['status'] ?? 'Active';
 
-        <strong>
-            <?= $borrowerCount ?>
-        </strong>
+    $allowedStatuses = ['Active', 'Inactive'];
 
-        <span>
-            Registered Borrowers
-        </span>
+    if (
+        $borrowerCode === '' ||
+        $fullName === '' ||
+        $departmentId <= 0 ||
+        !in_array($status, $allowedStatuses, true)
+    ) {
+        header("Location: borrowers.php?error=required");
+        exit;
+    }
 
-    </div>
+    try {
 
-</div>
+        /*
+        |--------------------------------------------------------------------------
+        | CHECK DEPARTMENT
+        |--------------------------------------------------------------------------
+        */
+
+        $stmt = $pdo->prepare("
+            SELECT id
+            FROM departments
+            WHERE id = ?
+            LIMIT 1
+        ");
+
+        $stmt->execute([$departmentId]);
+
+        if (!$stmt->fetch()) {
+            header("Location: borrowers.php?error=department");
+            exit;
+        }
 
 
-<?php if (isset($_GET['success'])): ?>
+        /*
+        |--------------------------------------------------------------------------
+        | CHECK DUPLICATE BORROWER CODE
+        |--------------------------------------------------------------------------
+        */
 
-    <div class="borrower-alert success-alert">
+        $stmt = $pdo->prepare("
+            SELECT id
+            FROM borrowers
+            WHERE borrower_code = ?
+            LIMIT 1
+        ");
 
-        <?php if ($_GET['success'] === 'added'): ?>
+        $stmt->execute([$borrowerCode]);
 
-            ✓ Borrower added successfully.
+        if ($stmt->fetch()) {
+            header("Location: borrowers.php?error=duplicate");
+            exit;
+        }
 
-        <?php elseif ($_GET['success'] === 'updated'): ?>
 
-            ✓ Borrower updated successfully.
+        /*
+        |--------------------------------------------------------------------------
+        | INSERT BORROWER
+        |--------------------------------------------------------------------------
+        */
 
-        <?php elseif ($_GET['success'] === 'deleted'): ?>
+        $stmt = $pdo->prepare("
+            INSERT INTO borrowers (
+                borrower_code,
+                full_name,
+                department_id,
+                position,
+                contact_number,
+                email,
+                status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ");
 
-            ✓ Borrower deleted successfully.
+        $stmt->execute([
+            $borrowerCode,
+            $fullName,
+            $departmentId,
+            $position,
+            $contactNumber,
+            $email,
+            $status
+        ]);
 
-        <?php else: ?>
+        header("Location: borrowers.php?success=added");
+        exit;
 
-            ✓ Operation completed successfully.
+    } catch (PDOException $e) {
+
+        header("Location: borrowers.php?error=database");
+        exit;
+    }
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| UPDATE BORROWER
+|--------------------------------------------------------------------------
+*/
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_borrower'])) {
+
+    $id = (int) ($_POST['id'] ?? 0);
+
+    $borrowerCode = trim($_POST['borrower_code'] ?? '');
+    $fullName = trim($_POST['full_name'] ?? '');
+    $departmentId = (int) ($_POST['department_id'] ?? 0);
+    $position = trim($_POST['position'] ?? '');
+    $contactNumber = trim($_POST['contact_number'] ?? '');
+    $email = trim($_POST['email'] ?? '');
+    $status = $_POST['status'] ?? 'Active';
+
+    $allowedStatuses = ['Active', 'Inactive'];
+
+    if (
+        $id <= 0 ||
+        $borrowerCode === '' ||
+        $fullName === '' ||
+        $departmentId <= 0 ||
+        !in_array($status, $allowedStatuses, true)
+    ) {
+        header("Location: borrowers.php?error=required");
+        exit;
+    }
+
+    try {
+
+        /*
+        |--------------------------------------------------------------------------
+        | CHECK BORROWER EXISTS
+        |--------------------------------------------------------------------------
+        */
+
+        $stmt = $pdo->prepare("
+            SELECT id
+            FROM borrowers
+            WHERE id = ?
+            LIMIT 1
+        ");
+
+        $stmt->execute([$id]);
+
+        if (!$stmt->fetch()) {
+            header("Location: borrowers.php?error=not_found");
+            exit;
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | CHECK DUPLICATE BORROWER CODE
+        |--------------------------------------------------------------------------
+        */
+
+        $stmt = $pdo->prepare("
+            SELECT id
+            FROM borrowers
+            WHERE borrower_code = ?
+            AND id != ?
+            LIMIT 1
+        ");
+
+        $stmt->execute([
+            $borrowerCode,
+            $id
+        ]);
+
+        if ($stmt->fetch()) {
+            header("Location: borrowers.php?error=duplicate");
+            exit;
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | UPDATE
+        |--------------------------------------------------------------------------
+        */
+
+        $stmt = $pdo->prepare("
+            UPDATE borrowers
+            SET
+                borrower_code = ?,
+                full_name = ?,
+                department_id = ?,
+                position = ?,
+                contact_number = ?,
+                email = ?,
+                status = ?
+            WHERE id = ?
+        ");
+
+        $stmt->execute([
+            $borrowerCode,
+            $fullName,
+            $departmentId,
+            $position,
+            $contactNumber,
+            $email,
+            $status,
+            $id
+        ]);
+
+        header("Location: borrowers.php?success=updated");
+        exit;
+
+    } catch (PDOException $e) {
+
+        header("Location: borrowers.php?error=database");
+        exit;
+    }
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| DELETE BORROWER
+|--------------------------------------------------------------------------
+*/
+
+if (isset($_GET['delete'])) {
+
+    $deleteId = (int) $_GET['delete'];
+
+    if ($deleteId <= 0) {
+        header("Location: borrowers.php?error=invalid");
+        exit;
+    }
+
+    try {
+
+        /*
+        |--------------------------------------------------------------------------
+        | CHECK FOR TRANSACTION HISTORY
+        |--------------------------------------------------------------------------
+        */
+
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*)
+            FROM transactions
+            WHERE borrower_id = ?
+        ");
+
+        $stmt->execute([$deleteId]);
+
+        $transactionCount = (int) $stmt->fetchColumn();
+
+        if ($transactionCount > 0) {
+
+            header("Location: borrowers.php?error=has_transactions");
+            exit;
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | DISCONNECT LINKED USER
+        |--------------------------------------------------------------------------
+        */
+
+        $stmt = $pdo->prepare("
+            UPDATE borrowers
+            SET user_id = NULL
+            WHERE id = ?
+        ");
+
+        $stmt->execute([$deleteId]);
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | DELETE
+        |--------------------------------------------------------------------------
+        */
+
+        $stmt = $pdo->prepare("
+            DELETE FROM borrowers
+            WHERE id = ?
+        ");
+
+        $stmt->execute([$deleteId]);
+
+        header("Location: borrowers.php?success=deleted");
+        exit;
+
+    } catch (PDOException $e) {
+
+        header("Location: borrowers.php?error=database");
+        exit;
+    }
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| LOAD DEPARTMENTS
+|--------------------------------------------------------------------------
+*/
+
+try {
+
+    $stmt = $pdo->query("
+        SELECT
+            id,
+            department_name
+        FROM departments
+        WHERE status = 'Active'
+        ORDER BY department_name ASC
+    ");
+
+    $departments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+} catch (PDOException $e) {
+
+    $departments = [];
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| LOAD BORROWERS
+|--------------------------------------------------------------------------
+*/
+
+try {
+
+    $stmt = $pdo->query("
+        SELECT
+            b.id,
+            b.borrower_code,
+            b.full_name,
+            b.department_id,
+            b.position,
+            b.contact_number,
+            b.email,
+            b.status,
+            b.user_id,
+            b.created_at,
+
+            d.department_name,
+
+            u.username
+
+        FROM borrowers b
+
+        LEFT JOIN departments d
+            ON b.department_id = d.id
+
+        LEFT JOIN users u
+            ON b.user_id = u.id
+
+        ORDER BY b.created_at DESC
+    ");
+
+    $borrowers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+} catch (PDOException $e) {
+
+    $borrowers = [];
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| EDIT BORROWER
+|--------------------------------------------------------------------------
+*/
+
+if (isset($_GET['edit'])) {
+
+    $editId = (int) $_GET['edit'];
+
+    if ($editId > 0) {
+
+        try {
+
+            $stmt = $pdo->prepare("
+                SELECT
+                    id,
+                    borrower_code,
+                    full_name,
+                    department_id,
+                    position,
+                    contact_number,
+                    email,
+                    status
+                FROM borrowers
+                WHERE id = ?
+                LIMIT 1
+            ");
+
+            $stmt->execute([$editId]);
+
+            $editBorrower = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+
+        } catch (PDOException $e) {
+
+            $editBorrower = null;
+        }
+    }
+}
+
+?>
+
+<?php require_once __DIR__ . '/../includes/header.php'; ?>
+
+<div class="app-layout">
+
+    <?php require_once __DIR__ . '/../includes/sidebar.php'; ?>
+
+    <main class="main-content">
+
+        <!-- PAGE HEADER -->
+
+        <div class="page-header">
+
+            <div>
+
+                <span class="borrower-label">
+                    BORROWER MANAGEMENT
+                </span>
+
+                <h1>Borrowers</h1>
+
+                <p>
+                    Manage employees and users who can borrow inventory items.
+                </p>
+
+            </div>
+
+            <div class="borrower-count">
+
+                <strong>
+                    <?= count($borrowers) ?>
+                </strong>
+
+                <span>
+                    Registered Borrowers
+                </span>
+
+            </div>
+
+        </div>
+
+
+        <!-- SUCCESS MESSAGE -->
+
+        <?php if (isset($_GET['success'])): ?>
+
+            <div class="borrower-alert success-alert">
+
+                <?php if ($_GET['success'] === 'added'): ?>
+
+                    ✓ Borrower added successfully.
+
+                <?php elseif ($_GET['success'] === 'updated'): ?>
+
+                    ✓ Borrower updated successfully.
+
+                <?php elseif ($_GET['success'] === 'deleted'): ?>
+
+                    ✓ Borrower deleted successfully.
+
+                <?php else: ?>
+
+                    ✓ Operation completed successfully.
+
+                <?php endif; ?>
+
+            </div>
 
         <?php endif; ?>
 
-    </div>
 
-<?php endif; ?>
+        <!-- ERROR MESSAGE -->
 
+        <?php if (isset($_GET['error'])): ?>
 
-<?php if (isset($_GET['error'])): ?>
+            <div class="borrower-alert error-alert">
 
-    <div class="borrower-alert error-alert">
+                <?php if ($_GET['error'] === 'required'): ?>
 
-        <?php if ($_GET['error'] === 'duplicate'): ?>
+                    Please complete all required fields.
 
-            Borrower ID already exists.
+                <?php elseif ($_GET['error'] === 'duplicate'): ?>
 
-        <?php elseif ($_GET['error'] === 'required'): ?>
+                    Borrower code already exists.
 
-            Please complete all required fields.
+                <?php elseif ($_GET['error'] === 'department'): ?>
 
-        <?php else: ?>
+                    Selected department does not exist.
 
-            Unable to complete the operation.
+                <?php elseif ($_GET['error'] === 'not_found'): ?>
 
-        <?php endif; ?>
+                    Borrower was not found.
 
-    </div>
+                <?php elseif ($_GET['error'] === 'has_transactions'): ?>
 
-<?php endif; ?>
+                    This borrower cannot be deleted because they have transaction history.
 
+                <?php elseif ($_GET['error'] === 'invalid'): ?>
 
-<!-- ADD / EDIT BORROWER -->
+                    Invalid borrower information.
 
-<div class="borrower-card">
+                <?php else: ?>
 
-    <div class="borrower-card-header">
+                    Unable to complete the operation.
 
-        <h2>
-            <?= $editBorrower ? 'Edit Borrower' : 'Add Borrower' ?>
-        </h2>
+                <?php endif; ?>
 
-        <p>
-            <?= $editBorrower
-                ? 'Update borrower information.'
-                : 'Register a new employee who can borrow inventory.'
-            ?>
-        </p>
-
-    </div>
-
-
-    <form
-        method="POST"
-        action="../actions/<?= $editBorrower
-            ? 'update_borrower.php'
-            : 'save_borrower.php'
-        ?>"
-        class="borrower-form"
-    >
-
-        <?php if ($editBorrower): ?>
-
-            <input
-                type="hidden"
-                name="id"
-                value="<?= (int) $editBorrower['id'] ?>"
-            >
+            </div>
 
         <?php endif; ?>
 
 
-        <div class="borrower-grid">
+        <!-- ADD / EDIT FORM -->
 
+        <div class="borrower-card">
 
-            <div class="borrower-field">
+            <div class="borrower-card-header">
 
-                <label for="borrower_code">
-                    Borrower ID *
-                </label>
+                <h2>
 
-                <input
-                    type="text"
-                    id="borrower_code"
-                    name="borrower_code"
-                    class="form-control"
-                    placeholder="Example: EMP-001"
-                    value="<?= htmlspecialchars(
-                        $editBorrower['borrower_code'] ?? ''
-                    ) ?>"
-                    required
-                >
+                    <?= $editBorrower
+                        ? 'Edit Borrower'
+                        : 'Add Borrower'
+                    ?>
 
-            </div>
+                </h2>
 
+                <p>
 
-            <div class="borrower-field">
+                    <?= $editBorrower
+                        ? 'Update borrower information.'
+                        : 'Register an employee who can borrow inventory.'
+                    ?>
 
-                <label for="full_name">
-                    Full Name *
-                </label>
-
-                <input
-                    type="text"
-                    id="full_name"
-                    name="full_name"
-                    class="form-control"
-                    placeholder="Example: Juan Dela Cruz"
-                    value="<?= htmlspecialchars(
-                        $editBorrower['full_name'] ?? ''
-                    ) ?>"
-                    required
-                >
+                </p>
 
             </div>
 
 
-            <div class="borrower-field">
+            <form method="POST" class="borrower-form">
 
-                <label for="department_id">
-                    Department *
-                </label>
+                <?php if ($editBorrower): ?>
 
-                <select
-                    id="department_id"
-                    name="department_id"
-                    class="form-control"
-                    required
-                >
-
-                    <option value="">
-                        Select department
-                    </option>
-
-                    <?php foreach ($departmentList as $department): ?>
-
-                        <option
-                            value="<?= (int) $department['id'] ?>"
-                            <?= (
-                                isset($editBorrower['department_id']) &&
-                                (int) $editBorrower['department_id']
-                                === (int) $department['id']
-                            ) ? 'selected' : '' ?>
-                        >
-
-                            <?= htmlspecialchars(
-                                $department['department_name']
-                            ) ?>
-
-                        </option>
-
-                    <?php endforeach; ?>
-
-                </select>
-
-            </div>
-
-
-            <div class="borrower-field">
-
-                <label for="position">
-                    Position
-                </label>
-
-                <input
-                    type="text"
-                    id="position"
-                    name="position"
-                    class="form-control"
-                    placeholder="Example: Staff"
-                    value="<?= htmlspecialchars(
-                        $editBorrower['position'] ?? ''
-                    ) ?>"
-                >
-
-            </div>
-
-
-            <div class="borrower-field">
-
-                <label for="contact_number">
-                    Contact Number
-                </label>
-
-                <input
-                    type="text"
-                    id="contact_number"
-                    name="contact_number"
-                    class="form-control"
-                    placeholder="Optional"
-                    value="<?= htmlspecialchars(
-                        $editBorrower['contact_number'] ?? ''
-                    ) ?>"
-                >
-
-            </div>
-
-
-            <div class="borrower-field">
-
-                <label for="email">
-                    Email
-                </label>
-
-                <input
-                    type="email"
-                    id="email"
-                    name="email"
-                    class="form-control"
-                    placeholder="Optional"
-                    value="<?= htmlspecialchars(
-                        $editBorrower['email'] ?? ''
-                    ) ?>"
-                >
-
-            </div>
-
-
-            <?php if ($editBorrower): ?>
-
-                <div class="borrower-field">
-
-                    <label for="status">
-                        Status
-                    </label>
-
-                    <select
-                        id="status"
-                        name="status"
-                        class="form-control"
+                    <input
+                        type="hidden"
+                        name="id"
+                        value="<?= (int) $editBorrower['id'] ?>"
                     >
 
-                        <option
-                            value="Active"
-                            <?= $editBorrower['status'] === 'Active'
-                                ? 'selected'
-                                : '' ?>
-                        >
-                            Active
-                        </option>
+                <?php endif; ?>
 
-                        <option
-                            value="Inactive"
-                            <?= $editBorrower['status'] === 'Inactive'
-                                ? 'selected'
-                                : '' ?>
-                        >
-                            Inactive
-                        </option>
 
-                    </select>
+                <div class="borrower-grid">
+
+
+                    <!-- BORROWER CODE -->
+
+                    <div class="borrower-field">
+
+                        <label>
+                            Borrower Code *
+                        </label>
+
+                        <input
+                            type="text"
+                            name="borrower_code"
+                            placeholder="Example: EMP-001"
+                            value="<?= htmlspecialchars(
+                                $editBorrower['borrower_code'] ?? ''
+                            ) ?>"
+                            required
+                        >
+
+                    </div>
+
+
+                    <!-- FULL NAME -->
+
+                    <div class="borrower-field">
+
+                        <label>
+                            Full Name *
+                        </label>
+
+                        <input
+                            type="text"
+                            name="full_name"
+                            placeholder="Example: Juan Dela Cruz"
+                            value="<?= htmlspecialchars(
+                                $editBorrower['full_name'] ?? ''
+                            ) ?>"
+                            required
+                        >
+
+                    </div>
+
+
+                    <!-- DEPARTMENT -->
+
+                    <div class="borrower-field">
+
+                        <label>
+                            Department *
+                        </label>
+
+                        <select
+                            name="department_id"
+                            required
+                        >
+
+                            <option value="">
+                                Select department
+                            </option>
+
+                            <?php foreach ($departments as $department): ?>
+
+                                <option
+                                    value="<?= (int) $department['id'] ?>"
+                                    <?= (
+                                        isset($editBorrower['department_id']) &&
+                                        (int) $editBorrower['department_id'] ===
+                                        (int) $department['id']
+                                    )
+                                        ? 'selected'
+                                        : ''
+                                    ?>
+                                >
+
+                                    <?= htmlspecialchars(
+                                        $department['department_name']
+                                    ) ?>
+
+                                </option>
+
+                            <?php endforeach; ?>
+
+                        </select>
+
+                    </div>
+
+
+                    <!-- POSITION -->
+
+                    <div class="borrower-field">
+
+                        <label>
+                            Position
+                        </label>
+
+                        <input
+                            type="text"
+                            name="position"
+                            placeholder="Example: IT Staff"
+                            value="<?= htmlspecialchars(
+                                $editBorrower['position'] ?? ''
+                            ) ?>"
+                        >
+
+                    </div>
+
+
+                    <!-- CONTACT -->
+
+                    <div class="borrower-field">
+
+                        <label>
+                            Contact Number
+                        </label>
+
+                        <input
+                            type="text"
+                            name="contact_number"
+                            placeholder="Example: 09123456789"
+                            value="<?= htmlspecialchars(
+                                $editBorrower['contact_number'] ?? ''
+                            ) ?>"
+                        >
+
+                    </div>
+
+
+                    <!-- EMAIL -->
+
+                    <div class="borrower-field">
+
+                        <label>
+                            Email
+                        </label>
+
+                        <input
+                            type="email"
+                            name="email"
+                            placeholder="Example: employee@email.com"
+                            value="<?= htmlspecialchars(
+                                $editBorrower['email'] ?? ''
+                            ) ?>"
+                        >
+
+                    </div>
+
+
+                    <!-- STATUS -->
+
+                    <div class="borrower-field">
+
+                        <label>
+                            Status *
+                        </label>
+
+                        <select
+                            name="status"
+                            required
+                        >
+
+                            <option
+                                value="Active"
+                                <?= (
+                                    ($editBorrower['status'] ?? 'Active') ===
+                                    'Active'
+                                )
+                                    ? 'selected'
+                                    : ''
+                                ?>
+                            >
+                                Active
+                            </option>
+
+                            <option
+                                value="Inactive"
+                                <?= (
+                                    ($editBorrower['status'] ?? '') ===
+                                    'Inactive'
+                                )
+                                    ? 'selected'
+                                    : ''
+                                ?>
+                            >
+                                Inactive
+                            </option>
+
+                        </select>
+
+                    </div>
 
                 </div>
 
-            <?php endif; ?>
 
+                <!-- BUTTONS -->
+
+                <div class="borrower-buttons">
+
+                    <?php if ($editBorrower): ?>
+
+                        <a
+                            href="borrowers.php"
+                            class="borrower-cancel"
+                        >
+                            Cancel
+                        </a>
+
+                        <button
+                            type="submit"
+                            name="update_borrower"
+                            class="borrower-save"
+                        >
+                            Save Changes
+                        </button>
+
+                    <?php else: ?>
+
+                        <button
+                            type="submit"
+                            name="save_borrower"
+                            class="borrower-save"
+                        >
+                            + Add Borrower
+                        </button>
+
+                    <?php endif; ?>
+
+                </div>
+
+            </form>
 
         </div>
 
 
-        <div class="borrower-buttons">
+        <!-- BORROWER LIST -->
 
-            <?php if ($editBorrower): ?>
+        <div class="borrower-card">
 
-                <a
-                    href="borrowers.php"
-                    class="btn borrower-cancel"
-                >
-                    Cancel
-                </a>
+            <div class="borrower-card-header">
 
-                <button
-                    type="submit"
-                    class="btn btn-primary borrower-save"
-                >
-                    Save Changes
-                </button>
+                <h2>
+                    Borrower List
+                </h2>
 
-            <?php else: ?>
+                <p>
+                    Employees registered in the inventory system.
+                </p>
 
-                <button
-                    type="submit"
-                    class="btn btn-primary borrower-save"
-                >
-                    + Add Borrower
-                </button>
+            </div>
 
-            <?php endif; ?>
+
+            <div class="borrower-table-container">
+
+                <table class="borrower-table">
+
+                    <thead>
+
+                        <tr>
+
+                            <th>Code</th>
+                            <th>Full Name</th>
+                            <th>Department</th>
+                            <th>Position</th>
+                            <th>Contact</th>
+                            <th>Email</th>
+                            <th>System User</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+
+                        </tr>
+
+                    </thead>
+
+
+                    <tbody>
+
+                    <?php if (empty($borrowers)): ?>
+
+                        <tr>
+
+                            <td colspan="9">
+
+                                <div class="borrower-empty">
+
+                                    <div>
+                                        👤
+                                    </div>
+
+                                    <strong>
+                                        No borrowers registered
+                                    </strong>
+
+                                    <p>
+                                        Add a borrower using the form above.
+                                    </p>
+
+                                </div>
+
+                            </td>
+
+                        </tr>
+
+                    <?php else: ?>
+
+
+                        <?php foreach ($borrowers as $borrower): ?>
+
+                            <tr>
+
+                                <!-- CODE -->
+
+                                <td>
+
+                                    <strong class="borrower-code">
+
+                                        <?= htmlspecialchars(
+                                            $borrower['borrower_code']
+                                        ) ?>
+
+                                    </strong>
+
+                                </td>
+
+
+                                <!-- NAME -->
+
+                                <td>
+
+                                    <strong>
+
+                                        <?= htmlspecialchars(
+                                            $borrower['full_name']
+                                        ) ?>
+
+                                    </strong>
+
+                                </td>
+
+
+                                <!-- DEPARTMENT -->
+
+                                <td>
+
+                                    <?= htmlspecialchars(
+                                        $borrower['department_name'] ?? '—'
+                                    ) ?>
+
+                                </td>
+
+
+                                <!-- POSITION -->
+
+                                <td>
+
+                                    <?= htmlspecialchars(
+                                        $borrower['position'] ?: '—'
+                                    ) ?>
+
+                                </td>
+
+
+                                <!-- CONTACT -->
+
+                                <td>
+
+                                    <?= htmlspecialchars(
+                                        $borrower['contact_number'] ?: '—'
+                                    ) ?>
+
+                                </td>
+
+
+                                <!-- EMAIL -->
+
+                                <td>
+
+                                    <?= htmlspecialchars(
+                                        $borrower['email'] ?: '—'
+                                    ) ?>
+
+                                </td>
+
+
+                                <!-- USER -->
+
+                                <td>
+
+                                    <?php if (!empty($borrower['username'])): ?>
+
+                                        <span class="linked-user">
+
+                                            <?= htmlspecialchars(
+                                                $borrower['username']
+                                            ) ?>
+
+                                        </span>
+
+                                    <?php else: ?>
+
+                                        <span class="not-linked">
+                                            Not linked
+                                        </span>
+
+                                    <?php endif; ?>
+
+                                </td>
+
+
+                                <!-- STATUS -->
+
+                                <td>
+
+                                    <?php if (
+                                        $borrower['status'] === 'Active'
+                                    ): ?>
+
+                                        <span class="borrower-status active">
+                                            Active
+                                        </span>
+
+                                    <?php else: ?>
+
+                                        <span class="borrower-status inactive">
+                                            Inactive
+                                        </span>
+
+                                    <?php endif; ?>
+
+                                </td>
+
+
+                                <!-- ACTIONS -->
+
+                                <td>
+
+                                    <div class="borrower-actions">
+
+                                        <a
+                                            href="borrowers.php?edit=<?= (int) $borrower['id'] ?>"
+                                            class="edit-button"
+                                        >
+                                            Edit
+                                        </a>
+
+                                        <a
+                                            href="borrowers.php?delete=<?= (int) $borrower['id'] ?>"
+                                            class="delete-button"
+                                            onclick="return confirm('Are you sure you want to delete this borrower?');"
+                                        >
+                                            Delete
+                                        </a>
+
+                                    </div>
+
+                                </td>
+
+                            </tr>
+
+                        <?php endforeach; ?>
+
+                    <?php endif; ?>
+
+                    </tbody>
+
+                </table>
+
+            </div>
 
         </div>
 
-    </form>
+    </main>
 
 </div>
 
-<!-- BORROWER LIST -->
 
-<div class="borrower-card">
-
-    <div class="borrower-card-header">
-
-        <h2>
-            Borrower List
-        </h2>
-
-        <p>
-            All registered employees who can borrow inventory.
-        </p>
-
-    </div>
-
-
-    <div class="table-container">
-
-        <table class="data-table">
-
-            <thead>
-
-                <tr>
-
-                    <th>Borrower ID</th>
-                    <th>Full Name</th>
-                    <th>Department</th>
-                    <th>Position</th>
-                    <th>Contact</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-
-                </tr>
-
-            </thead>
-
-
-            <tbody>
-
-            <?php if (empty($borrowers)): ?>
-
-                <tr>
-
-                    <td colspan="7">
-
-                        <div class="borrower-empty">
-
-                            <div class="borrower-empty-icon">
-                                👥
-                            </div>
-
-                            <strong>
-                                No borrowers yet
-                            </strong>
-
-                            <p>
-                                Add your first borrower using the form above.
-                            </p>
-
-                        </div>
-
-                    </td>
-
-                </tr>
-
-            <?php else: ?>
-
-                <?php foreach ($borrowers as $borrower): ?>
-
-                    <tr>
-
-                        <td>
-
-                            <strong class="borrower-code">
-
-                                <?= htmlspecialchars(
-                                    $borrower['borrower_code']
-                                ) ?>
-
-                            </strong>
-
-                        </td>
-
-
-                        <td>
-
-                            <strong>
-
-                                <?= htmlspecialchars(
-                                    $borrower['full_name']
-                                ) ?>
-
-                            </strong>
-
-                        </td>
-
-
-                        <td>
-
-                            <?= htmlspecialchars(
-                                $borrower['department_name'] ?? '—'
-                            ) ?>
-
-                        </td>
-
-
-                        <td>
-
-                            <?= htmlspecialchars(
-                                $borrower['position'] ?: '—'
-                            ) ?>
-
-                        </td>
-
-
-                        <td>
-
-                            <?= htmlspecialchars(
-                                $borrower['contact_number'] ?: '—'
-                            ) ?>
-
-                        </td>
-
-
-                        <td>
-
-                            <?php if (
-                                $borrower['status'] === 'Active'
-                            ): ?>
-
-                                <span class="status status-available">
-                                    Active
-                                </span>
-
-                            <?php else: ?>
-
-                                <span class="status status-maintenance">
-                                    Inactive
-                                </span>
-
-                            <?php endif; ?>
-
-                        </td>
-
-
-                        <td>
-
-                            <div class="borrower-actions">
-
-                                <a
-                                    href="borrowers.php?edit=<?= (int) $borrower['id'] ?>"
-                                    class="borrower-edit"
-                                >
-                                    Edit
-                                </a>
-
-                                <a
-                                    href="../actions/delete_borrower.php?id=<?= (int) $borrower['id'] ?>"
-                                    class="borrower-delete"
-                                    onclick="return confirm('Are you sure you want to delete this borrower?');"
-                                >
-                                    Delete
-                                </a>
-
-                            </div>
-
-                        </td>
-
-                    </tr>
-
-                <?php endforeach; ?>
-
-            <?php endif; ?>
-
-            </tbody>
-
-        </table>
-
-    </div>
-
-</div>
-
-</main> </div> <style> /* ========================================== BORROWER PAGE ========================================== */ .borrower-label { display: block; color: #198754; font-size: 11px; font-weight: 700; letter-spacing: 1px; margin-bottom: 5px; } .borrower-count { background: #ffffff; border: 1px solid #e4ebe6; border-radius: 12px; padding: 12px 20px; min-width: 160px; text-align: center; } .borrower-count strong { display: block; color: #173c29; font-size: 26px; } .borrower-count span { display: block; color: #78847d; font-size: 12px; margin-top: 3px; } /* ALERTS */ .borrower-alert { padding: 13px 16px; border-radius: 10px; margin-bottom: 20px; font-size: 14px; font-weight: 600; } .success-alert { background: #d1e7dd; color: #0f5132; } .error-alert { background: #f8d7da; color: #842029; } /* MAIN CARD */ .borrower-card { background: #ffffff; border: 1px solid #e4ebe6; border-radius: 14px; margin-bottom: 25px; overflow: hidden; } .borrower-card-header { padding: 20px 22px; border-bottom: 1px solid #edf1ee; } .borrower-card-header h2 { color: #173c29; font-size: 18px; margin-bottom: 5px; } .borrower-card-header p { color: #78847d; font-size: 13px; } /* FORM */ .borrower-form { padding: 22px; } .borrower-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; } .borrower-field label { display: block; margin-bottom: 7px; color: #536158; font-size: 13px; font-weight: 600; } .borrower-buttons { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; } .borrower-save { width: auto; } .borrower-cancel { background: #e9ecef; color: #41464b; text-decoration: none; } .borrower-cancel:hover { background: #dfe3e6; } /* TABLE */ .borrower-code { color: #198754; } .borrower-actions { display: flex; gap: 7px; } .borrower-actions a { text-decoration: none; padding: 6px 10px; border-radius: 7px; font-size: 12px; font-weight: 600; } .borrower-edit { background: #d1e7dd; color: #0f5132; } .borrower-edit:hover { background: #b9dfce; } .borrower-delete { background: #f8d7da; color: #842029; } .borrower-delete:hover { background: #f1bfc4; } /* EMPTY STATE */ .borrower-empty { text-align: center; padding: 40px 20px; } .borrower-empty-icon { font-size: 32px; margin-bottom: 10px; } .borrower-empty strong { display: block; color: #536158; font-size: 15px; margin-bottom: 5px; } .borrower-empty p { color: #78847d; font-size: 13px; } /* MOBILE */ @media (max-width: 900px) { .borrower-grid { grid-template-columns: repeat(2, 1fr); } } @media (max-width: 650px) { .borrower-count { margin-top: 12px; } .borrower-grid { grid-template-columns: 1fr; } .borrower-buttons { flex-direction: column; } .borrower-buttons .btn { width: 100%; text-align: center; } .borrower-actions { flex-direction: column; } } </style> <?php require_once __DIR__ . '/../includes/footer.php'; ?>
+<style>
+
+/*
+|--------------------------------------------------------------------------
+| HEADER
+|--------------------------------------------------------------------------
+*/
+
+.borrower-label {
+    display: block;
+    color: #198754;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    margin-bottom: 5px;
+}
+
+.borrower-count {
+    background: white;
+    border: 1px solid #e4ebe6;
+    border-radius: 12px;
+    padding: 12px 20px;
+    min-width: 170px;
+    text-align: center;
+}
+
+.borrower-count strong {
+    display: block;
+    color: #173c29;
+    font-size: 26px;
+}
+
+.borrower-count span {
+    color: #78847d;
+    font-size: 12px;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| ALERTS
+|--------------------------------------------------------------------------
+*/
+
+.borrower-alert {
+    padding: 13px 16px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.success-alert {
+    background: #d1e7dd;
+    color: #0f5132;
+}
+
+.error-alert {
+    background: #f8d7da;
+    color: #842029;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| CARD
+|--------------------------------------------------------------------------
+*/
+
+.borrower-card {
+    background: white;
+    border: 1px solid #e4ebe6;
+    border-radius: 14px;
+    margin-bottom: 25px;
+    overflow: hidden;
+}
+
+.borrower-card-header {
+    padding: 20px 22px;
+    border-bottom: 1px solid #edf1ee;
+}
+
+.borrower-card-header h2 {
+    color: #173c29;
+    font-size: 18px;
+    margin-bottom: 5px;
+}
+
+.borrower-card-header p {
+    color: #78847d;
+    font-size: 13px;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| FORM
+|--------------------------------------------------------------------------
+*/
+
+.borrower-form {
+    padding: 22px;
+}
+
+.borrower-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+}
+
+.borrower-field label {
+    display: block;
+    color: #536158;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 7px;
+}
+
+.borrower-field input,
+.borrower-field select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 11px 12px;
+    border: 1px solid #d9e2dc;
+    border-radius: 8px;
+    background: white;
+    color: #26332b;
+    font-size: 14px;
+    outline: none;
+}
+
+.borrower-field input:focus,
+.borrower-field select:focus {
+    border-color: #198754;
+    box-shadow: 0 0 0 3px rgba(25, 135, 84, 0.08);
+}
+
+.borrower-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 22px;
+}
+
+.borrower-save,
+.borrower-cancel {
+    border: none;
+    border-radius: 8px;
+    padding: 10px 17px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.borrower-save {
+    background: #198754;
+    color: white;
+}
+
+.borrower-save:hover {
+    background: #146c43;
+}
+
+.borrower-cancel {
+    background: #e9ecef;
+    color: #41464b;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| TABLE
+|--------------------------------------------------------------------------
+*/
+
+.borrower-table-container {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.borrower-table {
+    width: 100%;
+    min-width: 1050px;
+    border-collapse: collapse;
+}
+
+.borrower-table th {
+    background: #f6f9f7;
+    color: #536158;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: left;
+    padding: 13px 15px;
+    border-bottom: 1px solid #e4ebe6;
+    white-space: nowrap;
+}
+
+.borrower-table td {
+    padding: 14px 15px;
+    color: #3f4b44;
+    font-size: 13px;
+    border-bottom: 1px solid #edf1ee;
+    vertical-align: middle;
+}
+
+.borrower-table tbody tr:hover {
+    background: #fafcfb;
+}
+
+.borrower-code {
+    color: #198754;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| LINKED USER
+|--------------------------------------------------------------------------
+*/
+
+.linked-user {
+    display: inline-block;
+    background: #e8f5e9;
+    color: #198754;
+    padding: 5px 9px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.not-linked {
+    color: #8a938d;
+    font-size: 12px;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| STATUS
+|--------------------------------------------------------------------------
+*/
+
+.borrower-status {
+    display: inline-block;
+    padding: 5px 9px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.borrower-status.active {
+    background: #d1e7dd;
+    color: #0f5132;
+}
+
+.borrower-status.inactive {
+    background: #e9ecef;
+    color: #495057;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| ACTIONS
+|--------------------------------------------------------------------------
+*/
+
+.borrower-actions {
+    display: flex;
+    gap: 7px;
+}
+
+.borrower-actions a {
+    text-decoration: none;
+    padding: 6px 10px;
+    border-radius: 7px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.edit-button {
+    background: #d1e7dd;
+    color: #0f5132;
+}
+
+.edit-button:hover {
+    background: #b9dfce;
+}
+
+.delete-button {
+    background: #f8d7da;
+    color: #842029;
+}
+
+.delete-button:hover {
+    background: #f1bfc4;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| EMPTY STATE
+|--------------------------------------------------------------------------
+*/
+
+.borrower-empty {
+    text-align: center;
+    padding: 40px 20px;
+}
+
+.borrower-empty > div {
+    font-size: 35px;
+    margin-bottom: 10px;
+}
+
+.borrower-empty strong {
+    display: block;
+    color: #536158;
+    margin-bottom: 5px;
+}
+
+.borrower-empty p {
+    color: #78847d;
+    font-size: 13px;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| MOBILE
+|--------------------------------------------------------------------------
+*/
+
+@media (max-width: 1000px) {
+
+    .borrower-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+}
+
+@media (max-width: 650px) {
+
+    .borrower-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .borrower-buttons {
+        flex-direction: column;
+    }
+
+    .borrower-save,
+    .borrower-cancel {
+        width: 100%;
+        text-align: center;
+        box-sizing: border-box;
+    }
+
+}
+
+</style>
+
+<?php require_once __DIR__ . '/../includes/footer.php'; ?>
