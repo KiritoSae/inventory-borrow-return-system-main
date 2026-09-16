@@ -37,9 +37,9 @@ $stmt = $pdo->prepare("
         categories.category_name,
 
         transactions.id AS transaction_id,
-        transactions.borrow_date,
+        transactions.borrowed_date,
         transactions.due_date,
-        transactions.borrow_condition,
+        transactions.condition_before,
         transactions.remarks AS borrow_remarks,
 
         borrowers.borrower_code,
@@ -66,7 +66,7 @@ $stmt = $pdo->prepare("
 
     AND transactions.status = 'Borrowed'
 
-    ORDER BY transactions.borrow_date DESC
+    ORDER BY transactions.borrowed_date DESC
 
     LIMIT 1
 ");
@@ -310,7 +310,7 @@ if (!$data) {
                         date(
                             'M d, Y',
                             strtotime(
-                                $data['borrow_date']
+                                $data['borrowed_date']
                             )
                         )
                     ) ?>
@@ -388,10 +388,6 @@ if (!$data) {
 
                         <option value="Damaged">
                             Damaged
-                        </option>
-
-                        <option value="Needs Maintenance">
-                            Needs Maintenance
                         </option>
 
                     </select>
