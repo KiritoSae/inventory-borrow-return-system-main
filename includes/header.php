@@ -1,7 +1,13 @@
 <?php
+
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
+
+require_once __DIR__ . '/../config/config.php';
+
+$pageTitle = $pageTitle ?? 'Inventory Management System';
+
 ?>
 
 <!DOCTYPE html>
@@ -11,12 +17,20 @@ if (session_status() === PHP_SESSION_NONE) {
 
     <meta charset="UTF-8">
 
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
-    <title>Inventory Management System</title>
+    <title><?= htmlspecialchars($pageTitle) ?></title>
 
-    <link rel="stylesheet" href="/inventory-borrow-return-system-main/assets/css/style.css">
+    <link
+        rel="stylesheet"
+        href="<?= BASE_URL ?>/assets/css/style.css"
+    >
 
 </head>
 
 <body>
+
+<div class="page-wrapper">

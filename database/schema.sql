@@ -192,6 +192,49 @@ CREATE TABLE transactions (
         ON DELETE RESTRICT
 );
 
+CREATE TABLE borrow_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    item_id INT NOT NULL,
+
+    borrower_id INT NOT NULL,
+
+    requested_by INT NOT NULL,
+
+    due_date DATE NOT NULL,
+
+    remarks VARCHAR(255),
+
+    status ENUM('Pending', 'Approved', 'Rejected')
+        DEFAULT 'Pending',
+
+    processed_by INT NULL,
+
+    processed_at DATETIME NULL,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (item_id)
+        REFERENCES items(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+
+    FOREIGN KEY (borrower_id)
+        REFERENCES borrowers(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+
+    FOREIGN KEY (requested_by)
+        REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+
+    FOREIGN KEY (processed_by)
+        REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+);
+
 
 -- ==========================================
 -- INITIAL CATEGORIES

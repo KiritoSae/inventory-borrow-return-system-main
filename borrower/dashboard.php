@@ -186,6 +186,40 @@ $stmt = $pdo->prepare("
 $stmt->execute([$borrowerId]);
 $returnedCount = (int)$stmt->fetchColumn();
 
+/*
+|--------------------------------------------------------------------------
+| My Borrow Requests
+|--------------------------------------------------------------------------
+*/
+
+$stmt = $pdo->prepare("
+    SELECT
+        borrow_requests.id,
+        borrow_requests.due_date,
+        borrow_requests.remarks,
+        borrow_requests.status,
+        borrow_requests.created_at,
+
+        items.item_code,
+        items.item_name
+
+    FROM borrow_requests
+
+    INNER JOIN items
+        ON borrow_requests.item_id = items.id
+
+    WHERE borrow_requests.borrower_id = ?
+
+    ORDER BY borrow_requests.created_at DESC
+
+    LIMIT 10
+");
+
+$stmt->execute([$borrowerId]);
+
+$myRequests = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+
 ?>
 
 <!DOCTYPE html>
@@ -459,245 +493,238 @@ $returnedCount = (int)$stmt->fetchColumn();
     </div>
 
 
-    <!-- Borrow Item -->
+  <!-- Borrow Item -->
 
-    <div class="content-card">
+<div class="content-card">
 
-        <h2>Borrow an Item</h2>
+    <h2>Borrow an Item</h2>
 
-        <?php if (count($availableItems) > 0): ?>
+    <?php if (count($availableItems) > 0): ?>
 
-            <form
-                action="../actions/borrow_item.php"
-                method="POST"
-                class="borrow-form"
+        <form
+            action="../actions/request_borrow.php"
+            method="POST"
+            class="borrow-form"
+        >
+
+            <input
+                type="hidden"
+                name="borrower_id"
+                value="<?= $borrowerId ?>"
             >
 
-                <input
-                    type="hidden"
-                    name="borrower_id"
-                    value="<?= $borrowerId ?>"
+            <div class="form-group">
+
+                <label for="item_id">
+                    Select Item
+                </label>
+
+                <select
+                    name="item_id"
+                    id="item_id"
+                    required
                 >
 
-                <div class="form-group">
+                    <option value="">
+                        -- Select Item --
+                    </option>
 
-                    <label for="item_id">
-                        Select Item
-                    </label>
+                    <?php foreach ($availableItems as $item): ?>
 
-                    <select
-                        name="item_id"
-                        id="item_id"
-                        required
-                    >
+                        <option value="<?= $item['id'] ?>">
 
-                        <option value="">
-                            -- Select Item --
+                            <?= htmlspecialchars($item['item_code']) ?>
+                            -
+                            <?= htmlspecialchars($item['item_name']) ?>
+
                         </option>
-
-                        <?php foreach ($availableItems as $item): ?>
-
-                            <option value="<?= $item['id'] ?>">
-
-                                <?= htmlspecialchars($item['item_code']) ?>
-                                -
-                                <?= htmlspecialchars($item['item_name']) ?>
-
-                                <?php if (!empty($item['serial_number'])): ?>
-
-                                    (<?= htmlspecialchars($item['serial_number']) ?>)
-
-                                <?php endif; ?>
-
-                            </option>
-
-                        <?php endforeach; ?>
-
-                    </select>
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label for="due_date">
-                        Due Date
-                    </label>
-
-                    <input
-                        type="date"
-                        name="due_date"
-                        id="due_date"
-                        min="<?= date('Y-m-d') ?>"
-                        required
-                    >
-
-                </div>
-
-
-                <div>
-
-                    <button
-                        type="submit"
-                        class="btn btn-primary"
-                    >
-                        Borrow Item
-                    </button>
-
-                </div>
-
-            </form>
-
-        <?php else: ?>
-
-            <p class="empty-message">
-                There are currently no available items.
-            </p>
-
-        <?php endif; ?>
-
-    </div>
-
-
-    <!-- Current Borrowed Items -->
-
-    <div class="content-card">
-
-        <h2>My Borrowed Items</h2>
-
-        <?php if (count($borrowedItems) > 0): ?>
-
-            <div class="table-wrapper">
-
-                <table>
-
-                    <thead>
-
-                        <tr>
-
-                            <th>Transaction</th>
-                            <th>Item</th>
-                            <th>Borrowed Date</th>
-                            <th>Due Date</th>
-                            <th>Status</th>
-                            <th>Action</th>
-
-                        </tr>
-
-                    </thead>
-
-                    <tbody>
-
-                    <?php foreach ($borrowedItems as $item): ?>
-
-                        <tr>
-
-                            <td>
-                                <?= htmlspecialchars($item['transaction_code']) ?>
-                            </td>
-
-                            <td>
-
-                                <strong>
-                                    <?= htmlspecialchars($item['item_name']) ?>
-                                </strong>
-
-                                <br>
-
-                                <small>
-                                    <?= htmlspecialchars($item['item_code']) ?>
-                                </small>
-
-                            </td>
-
-                            <td>
-                                <?= htmlspecialchars($item['borrowed_date']) ?>
-                            </td>
-
-                            <td>
-                                <?= htmlspecialchars($item['due_date'] ?? 'N/A') ?>
-                            </td>
-
-                            <td>
-
-                                <?php if ($item['status'] === 'Overdue'): ?>
-
-                                    <span class="status status-overdue">
-                                        Overdue
-                                    </span>
-
-                                <?php else: ?>
-
-                                    <span class="status status-borrowed">
-                                        Borrowed
-                                    </span>
-
-                                <?php endif; ?>
-
-                            </td>
-
-                            <td>
-
-                                <form
-                                    action="../actions/return.php"
-                                    method="POST"
-                                    onsubmit="return confirm('Are you sure you want to return this item?');"
-                                >
-
-                                    <input
-                                        type="hidden"
-                                        name="transaction_id"
-                                        value="<?= $item['id'] ?>"
-                                    >
-
-                                    <input
-                                        type="hidden"
-                                        name="item_id"
-                                        value="<?= $item['item_id'] ?? '' ?>"
-                                    >
-
-                                    <input
-                                        type="hidden"
-                                        name="return_condition"
-                                        value="Good"
-                                    >
-
-                                    <input
-                                        type="hidden"
-                                        name="return_remarks"
-                                        value=""
-                                    >
-
-                                    <button
-                                        type="submit"
-                                        class="btn btn-danger"
-                                    >
-                                        Return
-                                    </button>
-
-                                </form>
-
-                            </td>
-
-                        </tr>
 
                     <?php endforeach; ?>
 
-                    </tbody>
-
-                </table>
+                </select>
 
             </div>
 
-        <?php else: ?>
 
-            <p class="empty-message">
-                You currently have no borrowed items.
-            </p>
+            <div class="form-group">
 
-        <?php endif; ?>
+                <label for="due_date">
+                    Due Date
+                </label>
 
-    </div>
+                <input
+                    type="date"
+                    name="due_date"
+                    id="due_date"
+                    min="<?= date('Y-m-d') ?>"
+                    required
+                >
+
+            </div>
+
+
+            <div>
+
+                <button
+                    type="submit"
+                    class="btn btn-primary"
+                >
+                    Request Item
+                </button>
+
+            </div>
+
+        </form>
+
+    <?php else: ?>
+
+        <p class="empty-message">
+            There are currently no available items.
+        </p>
+
+    <?php endif; ?>
+
+</div>
+
+
+<!-- =========================================================
+     MY BORROW REQUESTS
+========================================================== -->
+
+<div class="content-card">
+
+    <h2>My Borrow Requests</h2>
+
+    <?php if (count($myRequests) > 0): ?>
+
+        <div class="table-wrapper">
+
+            <table>
+
+                <thead>
+
+                    <tr>
+                        <th>Item</th>
+                        <th>Requested</th>
+                        <th>Due Date</th>
+                        <th>Status</th>
+                    </tr>
+
+                </thead>
+
+                <tbody>
+
+                <?php foreach ($myRequests as $request): ?>
+
+                    <tr>
+
+                        <td>
+
+                            <strong>
+                                <?= htmlspecialchars(
+                                    $request['item_name']
+                                ) ?>
+                            </strong>
+
+                            <br>
+
+                            <small>
+                                <?= htmlspecialchars(
+                                    $request['item_code']
+                                ) ?>
+                            </small>
+
+                        </td>
+
+
+                        <td>
+
+                            <?= htmlspecialchars(
+                                $request['created_at']
+                            ) ?>
+
+                        </td>
+
+
+                        <td>
+
+                            <?= htmlspecialchars(
+                                $request['due_date']
+                            ) ?>
+
+                        </td>
+
+
+                        <td>
+
+                            <?php
+
+                            $statusClass = 'status-pending';
+
+                            if ($request['status'] === 'Approved') {
+
+                                $statusClass = 'status-approved';
+
+                            } elseif ($request['status'] === 'Rejected') {
+
+                                $statusClass = 'status-rejected';
+
+                            }
+
+                            ?>
+
+                            <span
+                                class="status <?= $statusClass ?>"
+                            >
+
+                                <?= htmlspecialchars(
+                                    $request['status']
+                                ) ?>
+
+                            </span>
+
+                        </td>
+
+                    </tr>
+
+                <?php endforeach; ?>
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    <?php else: ?>
+
+        <p class="empty-message">
+            You have no borrow requests.
+        </p>
+
+    <?php endif; ?>
+
+</div>
+
+
+<!-- Current Borrowed Items -->
+
+<div class="content-card">
+
+    <h2>My Borrowed Items</h2>
+
+    <?php if (count($borrowedItems) > 0): ?>
+
+        <!-- your existing My Borrowed Items table goes here -->
+
+    <?php else: ?>
+
+        <p class="empty-message">
+            You currently have no borrowed items.
+        </p>
+
+    <?php endif; ?>
+
+</div>
 
 
     <!-- Return History -->

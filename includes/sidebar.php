@@ -1,51 +1,147 @@
+```php
+<?php
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+$role = $_SESSION['role'] ?? '';
+
+$role = strtolower(trim($role));
+
+$isAdmin = ($role === 'admin' || $role === 'administrator');
+$isStaff = ($role === 'staff');
+
+?>
+
 <aside class="sidebar">
-<div class="sidebar-logo">
 
-    <h2>
-        📦 Inventory
-    </h2>
+    <div class="sidebar-header">
+        <h2>Inventory</h2>
+        <p>Management System</p>
+    </div>
 
-    <p>
-        Borrow & Return System
-    </p>
+    <nav class="sidebar-nav">
 
-</div>
+        <?php if ($isAdmin): ?>
 
+            <!-- ADMIN NAVIGATION -->
 
-<nav>
+            <div class="nav-section">
+                <span class="nav-title">MAIN</span>
+            </div>
 
-    <a href="/inventory-borrow-return-system-main/admin/dashboard.php">
-        🏠 Dashboard
-    </a>
+            <a href="../admin/dashboard.php" class="nav-link">
+                <span>📊</span>
+                <span>Dashboard</span>
+            </a>
 
-    <a href="/inventory-borrow-return-system-main/admin/categories.php">
-         📂 Categories
-    </a>
+            <div class="nav-section">
+                <span class="nav-title">MANAGEMENT</span>
+            </div>
 
-    <a href="/inventory-borrow-return-system-main/admin/inventory.php">
-        📦 Inventory
-    </a>
+            <a href="../admin/inventory.php" class="nav-link">
+                <span>📦</span>
+                <span>Inventory</span>
+            </a>
 
-    <a href="/inventory-borrow-return-system-main/admin/borrowers.php">
-        ↗ Borrow Items
-    </a>
+            <a href="../admin/borrowers.php" class="nav-link">
+                <span>👥</span>
+                <span>Borrowers</span>
+            </a>
 
-    <a href="#">
-        ↩ Returns
-    </a>
+            <a href="../admin/departments.php" class="nav-link">
+                <span>🏢</span>
+                <span>Departments</span>
+            </a>
 
-    <a href="#">
-        👥 Users
-    </a>
+            <a href="../admin/users.php" class="nav-link">
+                <span>👤</span>
+                <span>Users</span>
+            </a>
 
-    <a href="#">
-        📊 Reports
-    </a>
+            <div class="nav-section">
+                <span class="nav-title">TRANSACTIONS</span>
+            </div>
 
-    <a href="/inventory-borrow-return-system/logout.php">
-        🚪 Logout
-    </a>
+            <a href="../admin/requests.php" class="nav-link">
+                <span>📋</span>
+                <span>Borrow Requests</span>
+            </a>
 
-</nav>
+            <a href="../admin/transactions.php" class="nav-link">
+                <span>🔄</span>
+                <span>Transactions</span>
+            </a>
+
+            <div class="nav-section">
+                <span class="nav-title">QR CODE</span>
+            </div>
+
+            <a href="../qr/scan.php" class="nav-link">
+                <span>📷</span>
+                <span>QR Scanner</span>
+            </a>
+
+        <?php elseif ($isStaff): ?>
+
+            <!-- STAFF NAVIGATION -->
+
+            <div class="nav-section">
+                <span class="nav-title">MAIN</span>
+            </div>
+
+            <a href="../borrower/dashboard.php" class="nav-link">
+                <span>📊</span>
+                <span>Dashboard</span>
+            </a>
+
+            <div class="nav-section">
+                <span class="nav-title">BORROWING</span>
+            </div>
+
+            <a href="../borrower/dashboard.php" class="nav-link">
+                <span>📦</span>
+                <span>Borrow / Return</span>
+            </a>
+
+            <div class="nav-section">
+                <span class="nav-title">QR CODE</span>
+            </div>
+
+            <a href="../qr/scan.php" class="nav-link">
+                <span>📷</span>
+                <span>QR Scanner</span>
+            </a>
+
+        <?php endif; ?>
+
+    </nav>
+
+    <div class="sidebar-footer">
+
+        <div class="user-info">
+            <div class="user-icon">
+                👤
+            </div>
+
+            <div class="user-details">
+                <strong>
+                    <?= htmlspecialchars($_SESSION['full_name'] ?? 'User') ?>
+                </strong>
+
+                <span>
+                    <?= htmlspecialchars($_SESSION['role'] ?? 'Staff') ?>
+                </span>
+            </div>
+        </div>
+
+        <a href="../logout.php" class="logout-link">
+            <span>🚪</span>
+            <span>Logout</span>
+        </a>
+
+    </div>
 
 </aside>
+```
