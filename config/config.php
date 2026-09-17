@@ -15,5 +15,5 @@
 
 define(
     'BASE_URL',
-    '/inventory-borrow-return-system-main'
+    rtrim(getenv('BASE_URL') ?: '/inventory-borrow-return-system-main', '/')
 );
