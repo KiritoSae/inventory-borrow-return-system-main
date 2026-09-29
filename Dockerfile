@@ -1,28 +1,29 @@
-FROM php:8.2-apache
+FROM php:8.2-fpm
 
 # Install MySQL PHP extensions (PDO + MySQLi)
 RUN docker-php-ext-install pdo_mysql mysqli
 
-# Avoid the "More than one MPM loaded" error by disabling mpm_prefork
-# (enabled by default in the base image) and enabling mpm_event, along
-# with mod_rewrite for routing.
-RUN a2dismod mpm_prefork \
-    && a2enmod mpm_event rewrite
+# Install nginx as the web server. This avoids the Apache
+# "More than one MPM loaded" crash entirely by not using Apache at all.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nginx \
+    && rm -rf /var/lib/apt/lists/*
 
-# Set the DocumentRoot to /var/www/html and allow .htaccess overrides
-# (needed for mod_rewrite based routing).
-ENV APACHE_DOCUMENT_ROOT=/var/www/html
-RUN sed -ri -e 's!AllowOverride None!AllowOverride All!g' /etc/apache2/apache2.conf
-
-WORKDIR /var/www/html
+WORKDIR /app
 
 # Copy application source
-COPY . /var/www/html
+COPY . /app
 
-# Ensure Apache owns the application files
-RUN chown -R www-data:www-data /var/www/html
+# Configure nginx to proxy PHP requests to php-fpm
+COPY docker/nginx.conf /etc/nginx/sites-available/default
 
-# Apache listens on port 80 by default; Railway handles the port mapping.
-EXPOSE 80
+# Startup script that boots php-fpm and nginx together
+COPY docker/start.sh /start.sh
+RUN chmod +x /start.sh
 
-CMD ["apache2-foreground"]
+# Ensure the app files are owned by the www-data user used by php-fpm/nginx
+RUN chown -R www-data:www-data /app
+
+EXPOSE 8080
+
+CMD ["/start.sh"]
