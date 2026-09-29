@@ -30,6 +30,8 @@ try {
 	);
 
 	echo "<!-- Database connected successfully -->";
+
+	require_once __DIR__ . '/schema.php';
 } catch (PDOException $e) {
 	error_log('Database connection failed: ' . $e->getMessage());
 	die('Database connection failed. Check the Railway database variables and deployment logs.');
